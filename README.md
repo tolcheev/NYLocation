@@ -24,3 +24,11 @@ Bluetooth Classic iAP2 requires an accessory certificate and private key accepte
 Without an accepted identity or helper, the Bluetooth mode cannot authenticate. The public source therefore does not provide a ready-to-use Bluetooth setup for every Mac. Do not commit or redistribute private accessory keys.
 
 The iAP2 implementation derives from [aur3l14no/accessory-location](https://github.com/aur3l14no/accessory-location). Attribution is in `Bluetooth/NOTICE`; the GPL-3.0-only license is in `LICENSE` and `Bluetooth/LICENSE`.
+
+## Public Bluetooth builds
+
+No shared signer is currently provisioned for this project. A fresh Mac cannot start a Bluetooth session with the current preview unless it already has a compatible identity. This is separate from pairing the phone.
+
+A publisher with an authorized signing service can build with `NYLOCATION_SIGNER_URL=https://your-service.example/sign ./build.sh`. The URL is fixed in the signed bundle; do not put credentials in it. The end user never needs key files. The service must accept HTTPS JSON POST requests with the same op/response format as the local helper: certificate returns type and base64 certificate; sign receives a base64 challenge and returns a base64 signature for the same identity. Only these operations and the challenge go to the configured service. Do not expose an unrestricted generic signing service. Verify against a real iPhone before promoting a configured build to stable.
+
+For the Intel + Apple silicon preview, use `NYLOCATION_PORTABLE=1 ./build.sh`. The archive does not record a build-machine Python path. This developer preview uses Apple's Command Line Tools Python on configured Macs; it is ad hoc signed and is not notarized. A production release also needs a bundled runtime or native worker, Developer ID signing and notarization for ordinary first launch.

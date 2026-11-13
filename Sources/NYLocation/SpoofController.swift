@@ -18,6 +18,19 @@ final class SpoofController: ObservableObject {
 
     func toggle() {
         if worker != nil { stop(); return }
+        if Bundle.main.object(forInfoDictionaryKey: "NYLocationBluetoothOnly") as? Bool == true,
+           Bundle.main.object(forInfoDictionaryKey: "NYLocationSignerURL") == nil,
+           ProcessInfo.processInfo.environment["NYLOCATION_AUTH_HELPER"] == nil {
+            let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/NYLocation/identity")
+            let env = ProcessInfo.processInfo.environment
+            let cert = env["ACCESSORY_MFI_CERT_FILE"] ?? root.appendingPathComponent("certificate.p7b").path
+            let key = env["ACCESSORY_MFI_KEY_FILE"] ?? root.appendingPathComponent("identity.pk8").path
+            guard [cert, key].allSatisfy(FileManager.default.isReadableFile(atPath:)) else {
+                error = true
+                status = "В этой предварительной версии ещё не подключён сервис авторизации. На новом Mac передача координат пока недоступна."
+                return
+            }
+        }
         guard let script = Bundle.main.url(forResource: "session", withExtension: "py", subdirectory: "Bluetooth") else {
             error = true
             status = "В приложении отсутствует модуль геолокации."

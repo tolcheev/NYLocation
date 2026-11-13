@@ -2,12 +2,13 @@
 import asyncio
 import json
 import os
+import plistlib
 from pathlib import Path
 import signal
 import subprocess
 import sys
 
-from accessory_location.auth import AuthenticationProvider
+from accessory_location.auth import AuthenticationProvider, ReleaseSigner
 from accessory_location.link import Link
 from accessory_location.profile import identity, location_message, location_sentences
 from accessory_location.transport import BluetoothStream, controller_address
@@ -16,6 +17,13 @@ from accessory_location.wire import Message, parameter, parameters
 HERE = Path(__file__).resolve().parent
 BRIDGE = HERE.parent / 'Helpers' / 'bluetooth-bridge'
 IDENTITY = Path.home() / 'Library/Application Support/NYLocation/identity'
+
+
+def release_signer_url():
+    plist = HERE.parent.parent / 'Info.plist'
+    if plist.is_file():
+        with plist.open('rb') as file:
+            return plistlib.load(file).get('NYLocationSignerURL')
 
 
 def report(event, text=''):
@@ -139,7 +147,8 @@ async def bluetooth_session():
     report('connecting','Подключаюсь к '+phone['name']+' по Bluetooth…')
     address = await controller_address(str(BRIDGE))
     helper = os.environ.get('NYLOCATION_AUTH_HELPER')
-    signer = AuthenticationProvider(helper) if helper else LocalIdentity()
+    url = release_signer_url()
+    signer = AuthenticationProvider(helper) if helper else ReleaseSigner(url) if url else LocalIdentity()
     bridge = str(BRIDGE)
     stream = await BluetoothStream.open(bridge, phone['address'])
     try:
@@ -174,15 +183,14 @@ async def session():
     # credential stays outside the bundle and is never part of a release.
     cert = Path(os.environ.get('ACCESSORY_MFI_CERT_FILE') or IDENTITY / 'certificate.p7b')
     key = Path(os.environ.get('ACCESSORY_MFI_KEY_FILE') or IDENTITY / 'identity.pk8')
-    if os.environ.get('NYLOCATION_AUTH_HELPER') or (cert.is_file() and key.is_file()):
+    if release_signer_url() or os.environ.get('NYLOCATION_AUTH_HELPER') or (cert.is_file() and key.is_file()):
         await bluetooth_session()
         return
 
     try:
         from pymobiledevice3.usbmux import list_devices
     except ImportError:
-        await bluetooth_session()
-        return
+        raise ValueError('В этой сборке нет сервиса Bluetooth для нового Mac. Для передачи координат нужна сборка с подключённым сервисом.') from None
 
     devices = [d for d in await list_devices() if d.is_usb]
     if not devices:

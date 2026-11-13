@@ -1,8 +1,9 @@
-"""Explicit, local authentication-provider boundary; no built-in remote service."""
+"""Local helper and publisher-configured HTTPS signing providers."""
 
 import asyncio
 import base64
 import json
+from urllib.parse import urlsplit
 
 from .wire import Message, ProtocolError, parameter
 
@@ -66,3 +67,34 @@ class AuthenticationProvider:
                 self.process.terminate()
                 await self.process.wait()
 
+
+class ReleaseSigner(AuthenticationProvider):
+    """The publisher owns the endpoint; private keys never reach the Mac."""
+
+    def __init__(self, url):
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname or parts.username is not None or parts.password is not None or parts.query or parts.fragment:
+            raise ValueError("Expected a public HTTPS signing endpoint without credentials")
+        self.url = url
+
+    async def request(self, operation, **fields):
+        # System curl uses the Mac trust store. Disable user curl config and
+        # redirects. The only outbound data is the operation and iPhone nonce.
+        proc = await asyncio.create_subprocess_exec(
+            "/usr/bin/curl", "-q", "--proto", "=https", "--silent", "--fail",
+            "--max-time", "12", "--max-filesize", "65536",
+            "--header", "Content-Type: application/json", "--data-binary", "@-",
+            "--url", self.url, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        try:
+            data, _ = await proc.communicate(json.dumps(dict(op=operation, **fields)).encode())
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+        if proc.returncode or not data or len(data) > 65536:
+            raise ValueError("Сервис подключения iPhone недоступен.")
+        result = json.loads(data)
+        if not isinstance(result, dict) or result.get("error"):
+            raise ValueError("Сервис не подтвердил подключение iPhone.")
+        return result
