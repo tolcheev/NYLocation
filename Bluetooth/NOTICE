@@ -1,0 +1,3 @@
+The iAP2 wire, link, GPS profile, transport, authentication provider and Objective-C bridge are based on aur3l14no/accessory-location (GPL-3.0-only).
+https://github.com/aur3l14no/accessory-location
+Local changes include paired-device matching, phone discovery, macOS Python compatibility, session control and integration with NY Location. The full license is in LICENSE.

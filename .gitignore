@@ -1,0 +1,17 @@
+.build/
+build/
+work/
+*.app/
+*.zip
+*.dmg
+*.apk
+*.pk8
+*.p7b
+*.pem
+*.key
+identity/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
