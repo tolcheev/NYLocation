@@ -1,5 +1,7 @@
 # NY Location
 
+**[Инструкция на русском для Mac и iPhone](README.ru.md)**
+
 Set a connected iPhone's location to Times Square (40.7580, -73.9855) from a Mac. One app includes USB and Bluetooth. [Download NY Location for macOS](https://github.com/tolcheev/NYLocation/releases/latest/download/NYLocation.zip).
 
 ## USB
