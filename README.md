@@ -1,34 +1,22 @@
 # NY Location
 
-A small macOS app that sends the coordinates of Times Square, New York (40.7580, -73.9855), to a paired iPhone. One button starts the session; the same button disconnects it.
+Set a connected iPhone's location to Times Square (40.7580, -73.9855) from a Mac. One app includes USB and Bluetooth. [Download NY Location for macOS](https://github.com/tolcheev/NYLocation/releases/latest/download/NYLocation.zip).
 
-## Use on the configured Mac
+## USB
 
-1. Turn off Airplane Mode on the iPhone. Turn on Bluetooth and Location Services, and pair the iPhone with the Mac in Bluetooth settings. Initial USB trust may be required.
-2. Open `NYLocation.app` and press **Подключить и сменить локацию**. If the app asks you to tap the Mac in the iPhone's Bluetooth settings, do so. Wait for the status saying coordinates are being sent.
-3. Open Health Checklist on the iPhone and configure the available Sleep Apnea Notifications, ECG, Irregular Rhythm Notifications and Hypertension Notifications.
-4. Press **Отключить iPhone**. Check that the iPhone has returned to its normal location. Restore any iPhone settings you changed for this session.
+1. Unzip the download and open NYLocation.app. The build is ad hoc signed. If macOS blocks it, review the app under System Settings → Privacy & Security → Open Anyway.
+2. Connect an unlocked iPhone using a data cable. Tap Trust if prompted. Turn on Location Services. For USB use iOS 17 or later and enable Developer Mode under Privacy & Security. Confirm the restart on the phone if requested.
+3. Leave USB selected and press **Подключить и сменить локацию**. The first connection may download a developer disk image. Keep the cable connected during setup.
+4. Once coordinates are being sent, open Health Checklist on the phone to configure features that are available to you. Press **Отключить iPhone** on the Mac before unplugging the cable to clear the simulation.
 
-The app cannot configure Health settings on the user's behalf. Feature availability also depends on the iPhone, Apple Watch, software and Apple's eligibility checks. In one local test, Sleep Apnea Notifications became available while the Bluetooth session was active; the other features were configured by the user, but their availability was not independently verified by this project.
+The download includes the app, Python and the USB libraries for Apple silicon and Intel. No separate Xcode or Python installation is required. Location simulation does not guarantee that a specific Health feature becomes available. The new packaged USB path has not yet been tested on a second physical Mac and iPhone.
+
+## Bluetooth
+
+Select Bluetooth, pair the iPhone with the Mac in Bluetooth settings, and press the same button. This mode requires an accepted accessory identity or an authorized signing helper on the Mac. The public build has no shared signer or credentials. On an unconfigured Mac, use USB. A Bluetooth prompt may ask you to tap the Mac on the iPhone.
+
+For a locally authorized identity place the DER certificate and private key in the current user's Library/Application Support/NYLocation/identity directory as certificate.p7b and identity.pk8. Restrict key access to its owner. The helper interface and publisher HTTPS signer are in Bluetooth/accessory_location/auth.py. Set NYLOCATION_SIGNER_URL at build time to configure a publisher endpoint.
 
 ## Build
 
-Requires macOS 14+, Swift 6/Xcode command line tools, and Python 3.9+. Run `./build.sh`; the app is written to `build/NYLocation.app`. The build signs the app locally with an ad hoc signature. A build for another Mac should be made on that Mac.
-
-The app prefers Bluetooth when a local accessory identity or signing helper is configured. Otherwise it tries USB, which requires `pymobiledevice3`, a trusted cable connection and iPhone Developer Mode. `build.sh` uses `../.venv/bin/python3` for the USB dependency when present; set `NYLOCATION_PYTHON` to another Python executable at build time. USB location simulation was tested, but its effect on Health feature eligibility was not established.
-
-## Bluetooth authentication
-
-Bluetooth Classic iAP2 requires an accessory certificate and private key accepted by the iPhone. **This repository and its app builds contain no certificate or private key.** Put an authorized DER PKCS#7 certificate at `~/Library/Application Support/NYLocation/identity/certificate.p7b` and its matching DER PKCS#8 P-256 key at `~/Library/Application Support/NYLocation/identity/identity.pk8`, with access restricted to the current user. Alternatively, set `ACCESSORY_MFI_CERT_FILE` and `ACCESSORY_MFI_KEY_FILE`, or provide `NYLOCATION_AUTH_HELPER` implementing the JSON-lines interface in `Bluetooth/accessory_location/auth.py`.
-
-Without an accepted identity or helper, the Bluetooth mode cannot authenticate. The public source therefore does not provide a ready-to-use Bluetooth setup for every Mac. Do not commit or redistribute private accessory keys.
-
-The iAP2 implementation derives from [aur3l14no/accessory-location](https://github.com/aur3l14no/accessory-location). Attribution is in `Bluetooth/NOTICE`; the GPL-3.0-only license is in `LICENSE` and `Bluetooth/LICENSE`.
-
-## Public Bluetooth builds
-
-No shared signer is currently provisioned for this project. A fresh Mac cannot start a Bluetooth session with the current preview unless it already has a compatible identity. This is separate from pairing the phone.
-
-A publisher with an authorized signing service can build with `NYLOCATION_SIGNER_URL=https://your-service.example/sign ./build.sh`. The URL is fixed in the signed bundle; do not put credentials in it. The end user never needs key files. The service must accept HTTPS JSON POST requests with the same op/response format as the local helper: certificate returns type and base64 certificate; sign receives a base64 challenge and returns a base64 signature for the same identity. Only these operations and the challenge go to the configured service. Do not expose an unrestricted generic signing service. Verify against a real iPhone before promoting a configured build to stable.
-
-For the Intel + Apple silicon preview, use `NYLOCATION_PORTABLE=1 ./build.sh`. The archive does not record a build-machine Python path. This developer preview uses Apple's Command Line Tools Python on configured Macs; it is ad hoc signed and is not notarized. A production release also needs a bundled runtime or native worker, Developer ID signing and notarization for ordinary first launch.
+On Apple silicon with Rosetta, Swift 6 command line tools and uv, run `./prepare-runtime.sh` then `./build.sh`. Output is build/NYLocation.app. Package versions for each architecture are in Support/requirements-*.txt. USB uses pymobiledevice3 11.54.0. Bluetooth protocol attribution is in Bluetooth/NOTICE. Project license is GPL-3.0-only. Dependency notices are included with the bundled Python distributions and packages.

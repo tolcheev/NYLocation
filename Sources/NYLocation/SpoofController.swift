@@ -7,6 +7,7 @@ final class SpoofController: ObservableObject {
     @Published private(set) var stopping = false
     @Published private(set) var error = false
     @Published private(set) var status = "Готово к подключению."
+    @Published var mode = "usb"
     private var worker: Process?
 
     init() {
@@ -18,19 +19,6 @@ final class SpoofController: ObservableObject {
 
     func toggle() {
         if worker != nil { stop(); return }
-        if Bundle.main.object(forInfoDictionaryKey: "NYLocationBluetoothOnly") as? Bool == true,
-           Bundle.main.object(forInfoDictionaryKey: "NYLocationSignerURL") == nil,
-           ProcessInfo.processInfo.environment["NYLOCATION_AUTH_HELPER"] == nil {
-            let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/NYLocation/identity")
-            let env = ProcessInfo.processInfo.environment
-            let cert = env["ACCESSORY_MFI_CERT_FILE"] ?? root.appendingPathComponent("certificate.p7b").path
-            let key = env["ACCESSORY_MFI_KEY_FILE"] ?? root.appendingPathComponent("identity.pk8").path
-            guard [cert, key].allSatisfy(FileManager.default.isReadableFile(atPath:)) else {
-                error = true
-                status = "В этой предварительной версии ещё не подключён сервис авторизации. На новом Mac передача координат пока недоступна."
-                return
-            }
-        }
         guard let script = Bundle.main.url(forResource: "session", withExtension: "py", subdirectory: "Bluetooth") else {
             error = true
             status = "В приложении отсутствует модуль геолокации."
@@ -38,10 +26,19 @@ final class SpoofController: ObservableObject {
         }
         let child = Process()
         let pipe = Pipe()
-        let configured = Bundle.main.object(forInfoDictionaryKey: "NYLocationDevicePython") as? String
-        let interpreter = configured.flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil }
-        child.executableURL = URL(fileURLWithPath: interpreter ?? "/usr/bin/python3")
-        child.arguments = ["-B", "-u", script.path]
+        #if arch(arm64)
+        let arch = "arm64"
+        #else
+        let arch = "x86_64"
+        #endif
+        guard let python = Bundle.main.resourceURL?.appendingPathComponent("Runtime/\(arch)/bin/python3"),
+              FileManager.default.isExecutableFile(atPath: python.path) else {
+            error = true
+            status = "В архиве отсутствует модуль подключения. Распакуйте приложение заново."
+            return
+        }
+        child.executableURL = python
+        child.arguments = ["-E", "-s", "-B", "-u", script.path, mode]
         child.standardInput = FileHandle.nullDevice
         child.standardOutput = pipe
         child.standardError = FileHandle.nullDevice
@@ -71,7 +68,10 @@ final class SpoofController: ObservableObject {
                 await Task.detached { child.waitUntilExit() }.value
             }
             guard worker === child else { return }
-            if stopping { error = false; status = "Соединение закрыто. Проверьте обычную геопозицию iPhone." }
+            if stopping {
+                error = child.terminationStatus != 0
+                status = error ? "Связь прервана. Проверьте геопозицию на iPhone." : "Сеанс завершён."
+            }
             else if !error { error = true; status = "Сеанс геолокации завершился." }
             worker = nil
             stopping = false

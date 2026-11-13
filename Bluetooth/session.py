@@ -117,8 +117,7 @@ async def control(link, address, signer):
         fallback = identified and authenticated and not subscribed_once and now >= fallback_due
         if identified and authenticated and (ready or fallback):
             sentences = location_sentences(40.7580,-73.9855)
-            # AnyGo sends a position after authentication even before a GPS
-            # subscription arrives. Keep the request-driven path when one does.
+            # Send the first fix after authentication, then follow subscription intervals.
             await link.send(location_message([sentences[k] for k in ready] if ready else [sentences[2]]))
             if not announced:
                 report('sending','Передаю координаты Таймс-сквер. Проверьте нужную функцию на iPhone.')
@@ -178,24 +177,19 @@ async def bluetooth_session():
             await signer.close()
 
 
-async def session():
-    # Prefer the mode verified with Health on the paired iPhone. The local
-    # credential stays outside the bundle and is never part of a release.
-    cert = Path(os.environ.get('ACCESSORY_MFI_CERT_FILE') or IDENTITY / 'certificate.p7b')
-    key = Path(os.environ.get('ACCESSORY_MFI_KEY_FILE') or IDENTITY / 'identity.pk8')
-    if release_signer_url() or os.environ.get('NYLOCATION_AUTH_HELPER') or (cert.is_file() and key.is_file()):
+async def session(mode):
+    if mode == 'bluetooth':
+        cert = Path(os.environ.get('ACCESSORY_MFI_CERT_FILE') or IDENTITY / 'certificate.p7b')
+        key = Path(os.environ.get('ACCESSORY_MFI_KEY_FILE') or IDENTITY / 'identity.pk8')
+        if not (release_signer_url() or os.environ.get('NYLOCATION_AUTH_HELPER') or (cert.is_file() and key.is_file())):
+            raise ValueError('Bluetooth на этом Mac ещё не настроен. Выберите USB и подключите iPhone кабелем.')
         await bluetooth_session()
         return
 
-    try:
-        from pymobiledevice3.usbmux import list_devices
-    except ImportError:
-        raise ValueError('В этой сборке нет сервиса Bluetooth для нового Mac. Для передачи координат нужна сборка с подключённым сервисом.') from None
-
+    from pymobiledevice3.usbmux import list_devices
     devices = [d for d in await list_devices() if d.is_usb]
     if not devices:
-        await bluetooth_session()
-        return
+        raise ValueError('iPhone не найден по USB. Подключите кабель для передачи данных и разблокируйте телефон.')
     if len(devices) != 1:
         raise ValueError('Подключите по кабелю только один iPhone.')
     from contextlib import AsyncExitStack
@@ -203,18 +197,43 @@ async def session():
     from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
     from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
 
-    report('connecting', 'Подключаюсь к службе геолокации iPhone по USB…')
-    async with AsyncExitStack() as stack:
-        async def connect():
-            rsd = await stack.enter_async_context(NativeRemotedTunnel(serial=devices[0].serial))
-            provider = await stack.enter_async_context(DvtProvider(rsd))
-            location = await stack.enter_async_context(LocationSimulation(provider))
-            return provider, location
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.services.amfi import AmfiService
+    from pymobiledevice3.exceptions import AlreadyMountedError, PairingError, NotTrustedError
+    from pymobiledevice3.services.mobile_image_mounter import auto_mount
+    from contextlib import suppress
 
-        provider, location = await asyncio.wait_for(connect(), 35)
+    serial = devices[0].serial
+    report('connecting', 'Разблокируйте iPhone и подтвердите «Доверять», если появится запрос.')
+    try:
+        lockdown = await create_using_usbmux(serial=serial, connection_type='USB', pair_timeout=90)
+    except (PairingError, NotTrustedError, TimeoutError) as exc:
+        raise ValueError('Не удалось получить доверие iPhone. Разблокируйте телефон и подтвердите подключение.') from exc
+    async with lockdown:
+        if int(lockdown.product_version.split('.')[0]) < 17:
+            raise ValueError('Для этого режима нужен iPhone с iOS 17 или новее.')
+        if not await lockdown.get_developer_mode_status():
+            with suppress(Exception):
+                await AmfiService(lockdown).reveal_developer_mode_option_in_ui()
+            raise ValueError('Включите на iPhone режим разработчика в настройках конфиденциальности, подтвердите перезагрузку и повторите подключение.')
+
+    report('connecting', 'Подключаю iPhone по USB…')
+    async with AsyncExitStack() as stack:
+        async def tunnel():
+            return await asyncio.wait_for(stack.enter_async_context(NativeRemotedTunnel(serial=serial)), 60)
+
+        rsd = await tunnel()
+        if DvtProvider.RSD_SERVICE_NAME not in rsd.peer_info['Services']:
+            report('connecting', 'Готовлю iPhone к первой передаче. Оставьте кабель подключённым. Может потребоваться интернет.')
+            with suppress(AlreadyMountedError):
+                await asyncio.wait_for(auto_mount(rsd), 600)
+            await stack.aclose()
+            rsd = await tunnel()
+        provider = await asyncio.wait_for(stack.enter_async_context(DvtProvider(rsd)), 30)
+        location = await asyncio.wait_for(stack.enter_async_context(LocationSimulation(provider)), 15)
         try:
             await asyncio.wait_for(location.set(40.7580, -73.9855), 12)
-            report('sending', 'iPhone принял координаты Таймс-сквер. Нажмите «Остановить», чтобы вернуть обычную геопозицию.')
+            report('sending', 'iPhone принял координаты Таймс-сквер. Оставьте кабель подключённым до окончания настройки.')
             await provider.dtx.wait_disconnected()
             raise ConnectionError('Связь с iPhone прервана.')
         except asyncio.CancelledError:
@@ -223,7 +242,10 @@ async def session():
 
 
 async def main():
-    task = asyncio.create_task(session())
+    mode = sys.argv[1] if len(sys.argv) == 2 else 'usb'
+    if mode not in ('usb', 'bluetooth'):
+        raise ValueError('Unknown transport')
+    task = asyncio.create_task(session(mode))
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM,signal.SIGINT):
         loop.add_signal_handler(sig,task.cancel)
@@ -232,7 +254,7 @@ async def main():
     except asyncio.CancelledError:
         pass
     except Exception as exc:
-        report('error',str(exc) or 'Связь с iPhone прервана.')
+        report('error', str(exc) or f'Не удалось завершить подключение ({type(exc).__name__}). Разблокируйте iPhone и повторите попытку.')
         return 1
     return 0
 

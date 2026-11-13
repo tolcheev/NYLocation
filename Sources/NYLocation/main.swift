@@ -7,7 +7,15 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 18) {
             Text("NY Location")
                 .font(.title2.bold())
-            Text("Перед запуском: выключите авиарежим, включите Bluetooth и Службы геолокации. Сопрягите iPhone с этим Mac.")
+            Picker("Подключение", selection: $controller.mode) {
+                Text("USB").tag("usb")
+                Text("Bluetooth").tag("bluetooth")
+            }
+            .pickerStyle(.segmented)
+            .disabled(controller.running)
+            Text(controller.mode == "usb"
+                ? "Подключите iPhone кабелем, разблокируйте и нажмите «Доверять». Включите Службы геолокации. Для USB нужен режим разработчика."
+                : "Включите Bluetooth и Службы геолокации на iPhone. Выберите этот Mac в настройках Bluetooth. Этот режим доступен на Mac с настроенной авторизацией аксессуара.")
                 .foregroundStyle(.secondary)
             Button(controller.running ? "Отключить iPhone" : "Подключить и сменить локацию", action: controller.toggle)
                 .buttonStyle(.borderedProminent)
